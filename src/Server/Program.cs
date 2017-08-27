@@ -7,22 +7,18 @@ using System.Threading.Tasks;
 
 namespace Server
 {
-    class ConnectionState
-    {
-        public Socket Socket { get; set; }
-        public byte[] Buffer = new byte[1000];
-    }
-
     class Program
     {
         static void Main(string[] args)
-            => MainAsync().GetAwaiter().GetResult();
-
-        private static async Task MainAsync()
         {
             var server = new Server(10891, 1000);
 
-            await server.Start();
+            server.Start2();
+
+            Console.WriteLine("Press ENTER to exit...");
+            Console.ReadLine();
+
+            server.Stop();
         }
     }
 
@@ -33,11 +29,32 @@ namespace Server
         private readonly int _backlog;
 
         private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+        private readonly ManualResetEvent _stopEvent = new ManualResetEvent(false);
 
         public Server(int port, int backlog)
         {
             _port = port;
             _backlog = backlog;
+        }
+
+        public void Start2()
+        {
+            _stopEvent.Reset();
+
+            Task.Run(
+                async () =>
+                {
+                    try
+                    {
+                        await Start();
+                    }
+                    finally
+                    {
+                        _stopEvent.Set();
+                    }
+                },
+                _cancellationTokenSource.Token
+            );
         }
 
         public async Task Start()
@@ -49,11 +66,11 @@ namespace Server
 
                 Console.WriteLine("Server started on: " + listener.LocalEndPoint);
 
-                while (!_cancellationTokenSource.IsCancellationRequested)
+                while (!_cancellationTokenSource.Token.IsCancellationRequested)
                 {
                     Socket clientSocket = await AcceptAsync(listener);
 
-                    var connection = new Connection(clientSocket);
+                    var connection = new Connection(clientSocket, _cancellationTokenSource.Token);
                     connection.Start();
 
                     _connections.Add(connection);
@@ -64,42 +81,32 @@ namespace Server
         public void Stop()
         {
             _cancellationTokenSource.Cancel();
+
+            _stopEvent.WaitOne();
         }
 
         private Task<Socket> AcceptAsync(Socket listener)
         {
             var tcs = new TaskCompletionSource<Socket>();
-            var state = new AcceptState
-            {
-                Listener = listener,
-                TaskCompletion = tcs
-            };
-
-            listener.BeginAccept(EndAcceptCallback, state);
+            listener.BeginAccept(EndCallback, listener);
 
             return tcs.Task;
-        }
 
-        private static void EndAcceptCallback(IAsyncResult asyncResult)
-        {
-            var state = (AcceptState)asyncResult.AsyncState;
-
-            try
+            void EndCallback(IAsyncResult asyncResult)
             {
-                Socket client = state.Listener.EndAccept(asyncResult);
+                Socket listenerState = (Socket)asyncResult.AsyncState;
 
-                state.TaskCompletion.TrySetResult(client);
-            }
-            catch (Exception ex)
-            {
-                state.TaskCompletion.TrySetException(ex);
-            }
-        }
+                try
+                {
+                    Socket client = listenerState.EndAccept(asyncResult);
 
-        class AcceptState
-        {
-            public Socket Listener;
-            public TaskCompletionSource<Socket> TaskCompletion;
+                    tcs.TrySetResult(client);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
         }
     }
 
@@ -107,16 +114,18 @@ namespace Server
     {
         private const short Header = 0x0CAE;
         private const int FullHeaderLength = 4;
-        private const int BufferSize = 256;
+        private const int BufferSize = 1000;
 
         private readonly Socket _socket;
+        private readonly CancellationToken _cancellationToken;
         private readonly byte[] _readBuffer = new byte[BufferSize];
         
         private int _readOffset;
 
-        public Connection(Socket socket)
+        public Connection(Socket socket, CancellationToken cancellationToken)
         {
             _socket = socket;
+            _cancellationToken = cancellationToken;
         }
 
         public void Start()
@@ -126,7 +135,7 @@ namespace Server
                 {
                     try
                     {
-                        while (true)
+                        while (!_cancellationToken.IsCancellationRequested)
                         {
                             byte[] data = await ReadData();
                             await SendAsync(data);
@@ -137,7 +146,9 @@ namespace Server
                     }
 
                     await DisconnectAsync();
-                });
+                },
+                _cancellationToken
+            );
         }
 
         private async Task<byte[]> ReadData()
@@ -173,45 +184,24 @@ namespace Server
         private Task<int> ReceiveAsync()
         {
             var tcs = new TaskCompletionSource<int>();
-
-            //var state = new AsyncState
-            //{
-            //    Socket = _socket,
-            //    CompletionSource = tcs
-            //};
-
-            _socket.BeginReceive(_readBuffer, _readOffset, _readBuffer.Length - _readOffset, SocketFlags.None,
-                asyncResult =>
-                {
-                    var socket = (Socket) asyncResult.AsyncState;
-                    try
-                    {
-                        int bytesRead = socket.EndReceive(asyncResult);
-                        tcs.TrySetResult(bytesRead);
-                    }
-                    catch (Exception ex)
-                    {
-                        tcs.TrySetException(ex);
-                    }
-                }, _socket);
+            _socket.BeginReceive(_readBuffer, _readOffset, _readBuffer.Length - _readOffset, SocketFlags.None, EndCallback, _socket);
             
             return tcs.Task;
+
+            void EndCallback(IAsyncResult asyncResult)
+            {
+                var socket = (Socket) asyncResult.AsyncState;
+                try
+                {
+                    int bytesRead = socket.EndReceive(asyncResult);
+                    tcs.TrySetResult(bytesRead);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
         }
-
-        //private static void EndReceiveCallback(IAsyncResult asyncResult)
-        //{
-        //    var state = (AsyncState)asyncResult.AsyncState;
-
-        //    try
-        //    {
-        //        int bytesRead = state.Socket.EndReceive(asyncResult);
-        //        state.CompletionSource.TrySetResult(bytesRead);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        state.CompletionSource.TrySetException(ex);
-        //    }
-        //}
 
         private int GetBytesRead()
         {
@@ -256,41 +246,25 @@ namespace Server
 
         private Task<int> SendAsync(byte[] data)
         {
-            var tcs = new TaskCompletionSource<int>();
-            
-            _socket.BeginSend(data, 0, data.Length, SocketFlags.None,
-                asyncResult =>
-                {
-                    Socket socket = (Socket)asyncResult.AsyncState;
-
-                    try
-                    {
-                        int bytesRead = socket.EndSend(asyncResult);
-                        tcs.TrySetResult(bytesRead);
-                    }
-                    catch (Exception ex)
-                    {
-                        tcs.TrySetException(ex);
-                    }
-                }, _socket);
+            var tcs = new TaskCompletionSource<int>();            
+            _socket.BeginSend(data, 0, data.Length, SocketFlags.None, EndCallback, _socket);
 
             return tcs.Task;
+
+            void EndCallback(IAsyncResult asyncResult)
+            {
+                Socket socket = (Socket)asyncResult.AsyncState;
+                try
+                {
+                    int bytesRead = socket.EndSend(asyncResult);
+                    tcs.TrySetResult(bytesRead);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
         }
-
-        //private static void EndSendCallback(IAsyncResult asyncResult)
-        //{
-        //    var state = (AsyncState)asyncResult.AsyncState;
-
-        //    try
-        //    {
-        //        int bytesRead = state.Socket.EndSend(asyncResult);
-        //        state.CompletionSource.TrySetResult(bytesRead);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        state.CompletionSource.TrySetException(ex);
-        //    }
-        //}
 
         private async Task DisconnectAsync()
         {
@@ -299,11 +273,5 @@ namespace Server
                 _socket.EndDisconnect
             );
         }
-
-        //class AsyncState
-        //{
-        //    public Socket Socket;
-        //    public TaskCompletionSource<int> CompletionSource;
-        //}
     }
 }

@@ -10,7 +10,7 @@ namespace Client
 {
     class Program
     {
-        private const int ClientsCount = 10_000;
+        private const int ClientsCount = 10;
 
         private static readonly Random _random = new Random();
 
@@ -25,7 +25,7 @@ namespace Client
             Task[] clientTasks = new Task[ClientsCount];
             for (int clientIndex = 0; clientIndex < clientTasks.Length; ++clientIndex)
             {
-                var client = new Client(clientIndex, 500, _random);
+                var client = new Client(clientIndex, 10, _random);
                 clientTasks[clientIndex] = Task.Run(client.Start);
             }
 
@@ -56,7 +56,7 @@ namespace Client
         public async Task Start()
         {
             var tcpClient = new TcpClient();
-            await tcpClient.ConnectAsync("192.168.1.6", 10891);
+            await tcpClient.ConnectAsync("192.168.1.5", 10891);
 
             Console.WriteLine("Client connected: " + _clientId);
 
