@@ -10,7 +10,7 @@ namespace Client
 {
     class Program
     {
-        private const int ClientsCount = 10;
+        private const int ClientsCount = 1;
 
         private static readonly Random _random = new Random();
 
@@ -25,8 +25,10 @@ namespace Client
             Task[] clientTasks = new Task[ClientsCount];
             for (int clientIndex = 0; clientIndex < clientTasks.Length; ++clientIndex)
             {
-                var client = new Client(clientIndex, 10, _random);
+                var client = new Client(clientIndex, 200);
                 clientTasks[clientIndex] = Task.Run(client.Start);
+
+                await Task.Delay(_random.Next(100, 500));
             }
 
             await Task.WhenAll(clientTasks);
@@ -44,21 +46,26 @@ namespace Client
     {
         private readonly int _clientId;
         private readonly int _attempts;
-        private readonly Random _random;
+        private readonly Random _random = new Random();
 
-        public Client(int clientId, int attempts, Random random)
+        public Client(int clientId, int attempts)
         {
             _clientId = clientId;
             _attempts = attempts;
-            _random = random;
         }
 
         public async Task Start()
         {
             var tcpClient = new TcpClient();
-            await tcpClient.ConnectAsync("192.168.1.5", 10891);
+            await tcpClient.ConnectAsync(IPAddress.Loopback, 10891);
+            if (!tcpClient.Connected)
+            {
+                throw new InvalidOperationException();
+            }
 
             Console.WriteLine("Client connected: " + _clientId);
+
+            byte[] fullSendBuffer = new byte[GetFullLength(1000)];
 
             var sw = new Stopwatch();
 
@@ -68,36 +75,42 @@ namespace Client
                 
                 for (int attempt = 0; attempt < _attempts; ++attempt)
                 {
-                    int length = _random.Next(10, 100);
-                    byte[] sendBuffer = new byte[length];
-                    _random.NextBytes(sendBuffer);
-
-                    byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)sendBuffer.Length));
-                    byte[] fullSendBuffer = new byte[4 + sendBuffer.Length];
-
-                    using (var ms = new MemoryStream(fullSendBuffer))
+                    int index = 0;
+                    for (int localIndex = 0; localIndex < headerBytes.Length; ++localIndex, ++index)
                     {
-                        ms.Write(headerBytes, 0, headerBytes.Length);
-                        ms.Write(lengthBytes, 0, lengthBytes.Length);
-                        ms.Write(sendBuffer, 0, sendBuffer.Length);
+                        fullSendBuffer[index] = headerBytes[localIndex];
                     }
-                    
+
+                    int length = _random.Next(10, 1000);
+                    byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)length));
+                    for (int localIndex = 0; localIndex < lengthBytes.Length; ++localIndex, ++index)
+                    {
+                        fullSendBuffer[index] = lengthBytes[localIndex];
+                    }
+
+                    var subBuffer = new ArraySegment<byte>(fullSendBuffer, index, length);
+                    _random.NextBytes(subBuffer.Array);
+
                     sw.Restart();
 
-                    await stream.WriteAsync(fullSendBuffer, 0, fullSendBuffer.Length);
+                    await stream.WriteAsync(fullSendBuffer, 0, GetFullLength(length));
                     await stream.FlushAsync();
 
-                    byte[] readBuffer = new byte[fullSendBuffer.Length];
-                    await stream.ReadAsync(readBuffer, 0, readBuffer.Length);
+                    await stream.ReadAsync(fullSendBuffer, 0, GetFullLength(length));
 
                     sw.Stop();
-                    Console.WriteLine($"Client {_clientId} in {attempt} attempt sent {length} bytes: {sw.Elapsed}");
+                    Console.WriteLine($"Client {_clientId} in {attempt} attempt sent {length} bytes in {sw.Elapsed.TotalMilliseconds} ms");
 
-                    await Task.Delay(_random.Next(100, 500));
+                    await Task.Delay(_random.Next(10, 500));
                 }
             }
 
             Console.WriteLine("Client done: " + _clientId);
+        }
+
+        private static int GetFullLength(int length)
+        {
+            return 2 + 2 + length;
         }
     }
 }
