@@ -185,7 +185,7 @@ namespace Server
 
             void EndCallback(IAsyncResult asyncResult)
             {
-                Socket socket = (Socket)asyncResult.AsyncState;
+                var socket = (Socket)asyncResult.AsyncState;
                 try
                 {
                     int bytesRead = socket.EndSend(asyncResult);

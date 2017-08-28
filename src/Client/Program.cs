@@ -88,8 +88,8 @@ namespace Client
                         fullSendBuffer[index] = lengthBytes[localIndex];
                     }
 
-                    var subBuffer = new ArraySegment<byte>(fullSendBuffer, index, length);
-                    _random.NextBytes(subBuffer.Array);
+                    //var subBuffer = new ArraySegment<byte>(fullSendBuffer, index, length);
+                    //_random.NextBytes(subBuffer.Array);
 
                     sw.Restart();
 
