@@ -81,15 +81,12 @@ namespace Client
                         fullSendBuffer[index] = headerBytes[localIndex];
                     }
 
-                    int length = _random.Next(10, 1000);
-                    byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder((short)length));
+                    short length = (short)_random.Next(10, 1000);
+                    byte[] lengthBytes = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(length));
                     for (int localIndex = 0; localIndex < lengthBytes.Length; ++localIndex, ++index)
                     {
                         fullSendBuffer[index] = lengthBytes[localIndex];
                     }
-
-                    //var subBuffer = new ArraySegment<byte>(fullSendBuffer, index, length);
-                    //_random.NextBytes(subBuffer.Array);
 
                     sw.Restart();
 

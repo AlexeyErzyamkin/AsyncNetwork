@@ -19,6 +19,8 @@ namespace Server
             _backlog = backlog;
         }
 
+        public IProducerConsumerCollection<byte[]> Channel
+
         public async Task Start()
         {
             using (Socket listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
