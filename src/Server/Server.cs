@@ -6,18 +6,6 @@ using System.Threading.Tasks;
 
 namespace Server
 {
-    //class ClientData
-    //{
-    //    public ClientData(IClient client, byte[] data)
-    //    {
-    //        Client = client;
-    //        Data = data;
-    //    }
-
-    //    public IClient Client { get; }
-    //    public byte[] Data { get; }
-    //}
-
     interface IClientConnectionFactory
     {
         ClientConnection Create(Guid clientId, Socket socket);
@@ -25,14 +13,11 @@ namespace Server
 
     class Server
     {
-        //public delegate void ClientConnectedHandler(ClientConnection connection);
-
-        public Server(int port, int backlog, IClientConnectionFactory connectionFactory)//, ClientConnectedHandler clientConnectedHandler)
+        public Server(int port, int backlog, IClientConnectionFactory connectionFactory)
         {
             _port = port;
             _backlog = backlog;
             _connectionFactory = connectionFactory;
-            //_clientConnectedHandler = clientConnectedHandler;
         }
 
         public async Task Start()
@@ -52,10 +37,10 @@ namespace Server
                     var connection = _connectionFactory.Create(clientId, clientSocket);
                     connection.Start();
 
-                    if (!_connections.TryAdd(clientId, connection))
-                    {
-                        await connection.DisconnectAsync();
-                    }
+                    // if (!_connections.TryAdd(clientId, connection))
+                    // {
+                    //     await connection.DisconnectAsync();
+                    // }
                 }
             }
         }
@@ -84,11 +69,15 @@ namespace Server
             }
         }
 
-        private readonly ConcurrentDictionary<Guid, ClientConnection> _connections = new ConcurrentDictionary<Guid, ClientConnection>();
+        #region Private Fields
+
+        // private readonly ConcurrentDictionary<Guid, ClientConnection> _connections = new ConcurrentDictionary<Guid, ClientConnection>();
         private readonly int _port;
         private readonly int _backlog;
 
         private readonly IClientConnectionFactory _connectionFactory;
-        //private ClientConnectedHandler _clientConnectedHandler;
+
+        #endregion Private Fields
+
     }
 }

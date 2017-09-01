@@ -11,13 +11,11 @@ namespace Server
         {
         }
 
-        private static Task DataReceivedHandler(ClientConnection self, byte[] data)
+        private static async Task DataReceivedHandler(ClientConnection self, byte[] data)
         {
             // Some processing
 
-            self.Send(data);
-
-            return Task.CompletedTask;
+            await self.Send(data);
         }
     }
 }

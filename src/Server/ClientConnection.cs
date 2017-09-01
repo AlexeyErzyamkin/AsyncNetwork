@@ -32,25 +32,11 @@ namespace Server
     //    }
     //}
 
-    class ClientConnection //: IClient
+    class ClientConnection
     {
         private const short Header = 0x0CAE;
         private const int FullHeaderLength = 4;
-        private const int BufferSize = 1000;
-
-        private readonly Guid _clientId;
-        private readonly Socket _socket;
-
-        private readonly byte[] _readBuffer = new byte[BufferSize];
-        private int _readOffset;
-
-        //private readonly ConcurrentQueue<byte[]> _sendQueue = new ConcurrentQueue<byte[]>();
-
-        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
-        private Task _readTask;
-
-        private readonly Func<ClientConnection, byte[], Task> _dataReceivedHandler;
-        private readonly BufferBlock<byte[]> _sendBlock;
+        private const int BufferSize = FullHeaderLength + 1000;
 
         public ClientConnection(Guid clientId, Socket socket, Func<ClientConnection, byte[], Task> dataReceivedHandler)
         {
@@ -59,6 +45,11 @@ namespace Server
             _dataReceivedHandler = dataReceivedHandler;
 
             _sendBlock = new BufferBlock<byte[]>();
+
+            // _sendBlock = new BufferBlock<byte[]>(new DataflowBlockOptions
+            // {
+            //     BoundedCapacity = 1
+            // });
         }
 
         public Guid ClientId { get; }
@@ -87,27 +78,35 @@ namespace Server
                 _cancellationTokenSource.Token
             );
 
-            Task.Run(
+            _sendTask = Task.Run(
                 async () =>
                 {
-                    while (true)
+                    while (await _sendBlock.OutputAvailableAsync())
                     {
                         byte[] dataToSend = await _sendBlock.ReceiveAsync();
-                        await SendAsync(dataToSend);
+                        if (dataToSend != null)
+                        {
+                            await SendAsync(dataToSend);
+                        }
                     }
                 },
                 _cancellationTokenSource.Token
             );
         }
 
-        public void Stop()
+        public async Task Stop()
         {
             _cancellationTokenSource.Cancel();
+
+            await Task.WhenAll(_readTask, _sendTask);
         }
 
-        public void Send(byte[] data)
+        public async Task Send(byte[] data)
         {
-            _sendBlock.Post(data);
+            if (data != null)
+            {
+                await _sendBlock.SendAsync(data);
+            }
         }
         
         private async Task<byte[]> ReadData()
@@ -143,7 +142,9 @@ namespace Server
         private Task<int> ReceiveAsync()
         {
             var tcs = new TaskCompletionSource<int>();
-            _socket.BeginReceive(_readBuffer, _readOffset, _readBuffer.Length - _readOffset, SocketFlags.None, EndCallback, _socket);
+            var size = _readBuffer.Length - _readOffset;
+
+            _socket.BeginReceive(_readBuffer, _readOffset, size, SocketFlags.None, EndCallback, _socket);
             
             return tcs.Task;
 
@@ -220,6 +221,7 @@ namespace Server
                 }
                 catch (Exception ex)
                 {
+                    Console.WriteLine(ex.ToString());
                     tcs.TrySetException(ex);
                 }
             }
@@ -245,11 +247,24 @@ namespace Server
                     tcs.TrySetException(ex);
                 }
             }
-
-            //await Task.Factory.FromAsync(
-            //    _socket.BeginDisconnect(false, null, null),
-            //    _socket.EndDisconnect
-            //);
         }
+
+#region Private Fields
+
+        private readonly Guid _clientId;
+        private readonly Socket _socket;
+
+        private readonly byte[] _readBuffer = new byte[BufferSize];
+        private int _readOffset;
+
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
+        private Task _readTask;
+        private Task _sendTask;
+
+        private readonly Func<ClientConnection, byte[], Task> _dataReceivedHandler;
+        private readonly BufferBlock<byte[]> _sendBlock;
+
+#endregion Private Fields
+
     }
 }

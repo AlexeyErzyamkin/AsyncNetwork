@@ -25,10 +25,10 @@ namespace Client
             Task[] clientTasks = new Task[ClientsCount];
             for (int clientIndex = 0; clientIndex < clientTasks.Length; ++clientIndex)
             {
-                var client = new Client(clientIndex, 1000);
+                var client = new Client(clientIndex, 2000);
                 clientTasks[clientIndex] = Task.Run(client.Start);
 
-                await Task.Delay(_random.Next(100, 500));
+                //await Task.Delay(_random.Next(100, 500));
             }
 
             await Task.WhenAll(clientTasks);
@@ -63,7 +63,7 @@ namespace Client
                 throw new InvalidOperationException();
             }
 
-            Console.WriteLine("Client connected: " + _clientId);
+            //Console.WriteLine("Client connected: " + _clientId);
 
             byte[] fullSendBuffer = new byte[GetFullLength(1000)];
 
@@ -88,21 +88,25 @@ namespace Client
                         fullSendBuffer[index] = lengthBytes[localIndex];
                     }
 
-                    sw.Restart();
+                    //sw.Restart();
 
                     await stream.WriteAsync(fullSendBuffer, 0, GetFullLength(length));
                     await stream.FlushAsync();
 
-                    await stream.ReadAsync(fullSendBuffer, 0, GetFullLength(length));
+                    //sw.Stop();
+                    //Console.WriteLine($"Client {_clientId} in {attempt} attempt sent {length} bytes in {sw.Elapsed.TotalMilliseconds} ms");
+                    //sw.Restart();
 
-                    sw.Stop();
-                    Console.WriteLine($"Client {_clientId} in {attempt} attempt sent {length} bytes in {sw.Elapsed.TotalMilliseconds} ms");
+                    var receivedLength = await stream.ReadAsync(fullSendBuffer, 0, GetFullLength(length));
+
+                    //sw.Stop();
+                    //Console.WriteLine($"Client {_clientId} in {attempt} attempt received {receivedLength} bytes in {sw.Elapsed.TotalMilliseconds} ms");
 
                     //await Task.Delay(_random.Next(10, 500));
                 }
             }
 
-            Console.WriteLine("Client done: " + _clientId);
+            //Console.WriteLine("Client done: " + _clientId);
         }
 
         private static int GetFullLength(int length)
