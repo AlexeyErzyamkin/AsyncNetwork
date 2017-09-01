@@ -6,20 +6,34 @@ using System.Threading.Tasks;
 
 namespace Server
 {
+    //class ClientData
+    //{
+    //    public ClientData(IClient client, byte[] data)
+    //    {
+    //        Client = client;
+    //        Data = data;
+    //    }
+
+    //    public IClient Client { get; }
+    //    public byte[] Data { get; }
+    //}
+
+    interface IClientConnectionFactory
+    {
+        ClientConnection Create(Guid clientId, Socket socket);
+    }
+
     class Server
     {
-        private readonly ConcurrentBag<ClientConnection> _connections = new ConcurrentBag<ClientConnection>();
-        private readonly ConcurrentQueue<byte[]> _readChannel = new ConcurrentQueue<byte[]>();
-        private readonly int _port;
-        private readonly int _backlog;
+        //public delegate void ClientConnectedHandler(ClientConnection connection);
 
-        public Server(int port, int backlog)
+        public Server(int port, int backlog, IClientConnectionFactory connectionFactory)//, ClientConnectedHandler clientConnectedHandler)
         {
             _port = port;
             _backlog = backlog;
+            _connectionFactory = connectionFactory;
+            //_clientConnectedHandler = clientConnectedHandler;
         }
-
-        public IProducerConsumerCollection<byte[]> Channel
 
         public async Task Start()
         {
@@ -34,10 +48,14 @@ namespace Server
                 {
                     Socket clientSocket = await AcceptAsync(listener);
 
-                    var connection = new ClientConnection(clientSocket, _readChannel);
+                    var clientId = Guid.NewGuid();
+                    var connection = _connectionFactory.Create(clientId, clientSocket);
                     connection.Start();
 
-                    _connections.Add(connection);
+                    if (!_connections.TryAdd(clientId, connection))
+                    {
+                        await connection.DisconnectAsync();
+                    }
                 }
             }
         }
@@ -65,5 +83,12 @@ namespace Server
                 }
             }
         }
+
+        private readonly ConcurrentDictionary<Guid, ClientConnection> _connections = new ConcurrentDictionary<Guid, ClientConnection>();
+        private readonly int _port;
+        private readonly int _backlog;
+
+        private readonly IClientConnectionFactory _connectionFactory;
+        //private ClientConnectedHandler _clientConnectedHandler;
     }
 }

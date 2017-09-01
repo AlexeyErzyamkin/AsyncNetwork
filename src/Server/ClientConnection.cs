@@ -1,38 +1,67 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Dataflow;
 
 namespace Server
 {
-    class ClientConnection
+    //interface IClient
+    //{
+    //    void Send(byte[] data);
+    //}
+
+    //class WeakClient : IClient
+    //{
+    //    private readonly WeakReference<ClientConnection> _connection;
+
+    //    public WeakClient(ClientConnection connection)
+    //    {
+    //        _connection = new WeakReference<ClientConnection>(connection);
+    //    }
+
+    //    public void Send(byte[] data)
+    //    {
+    //        if (_connection.TryGetTarget(out ClientConnection connection))
+    //        {
+    //            connection.Send(data);
+    //        }
+    //    }
+    //}
+
+    class ClientConnection //: IClient
     {
         private const short Header = 0x0CAE;
         private const int FullHeaderLength = 4;
         private const int BufferSize = 1000;
 
+        private readonly Guid _clientId;
         private readonly Socket _socket;
 
-        //private readonly CancellationToken _cancellationToken;
         private readonly byte[] _readBuffer = new byte[BufferSize];
         private int _readOffset;
 
-        private readonly IProducerConsumerCollection<byte[]> _readChannel;
-        private readonly ConcurrentQueue<byte[]> _sendQueue = new ConcurrentQueue<byte[]>();
+        //private readonly ConcurrentQueue<byte[]> _sendQueue = new ConcurrentQueue<byte[]>();
 
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
         private Task _readTask;
-        // private Task _sendTask;
-        
-        private readonly object _sendTaskSync = new object();
-        private volatile bool _sendTaskWorking;
 
-        public ClientConnection(Socket socket, IProducerConsumerCollection<byte[]> readChannel)
+        private readonly Func<ClientConnection, byte[], Task> _dataReceivedHandler;
+        private readonly BufferBlock<byte[]> _sendBlock;
+
+        public ClientConnection(Guid clientId, Socket socket, Func<ClientConnection, byte[], Task> dataReceivedHandler)
         {
+            ClientId = clientId;
             _socket = socket;
-            _readChannel = readChannel;
+            _dataReceivedHandler = dataReceivedHandler;
+
+            _sendBlock = new BufferBlock<byte[]>();
         }
+
+        public Guid ClientId { get; }
 
         public void Start()
         {
@@ -44,45 +73,43 @@ namespace Server
                         while (true)
                         {
                             byte[] data = await ReadData();
-                            _readChannel.TryAdd(data);
+
+                            if (_dataReceivedHandler != null)
+                            {
+                                await _dataReceivedHandler(this, data);
+                            }
                         }
                     }
                     catch (InvalidOperationException)
                     {
                     }
-                }
+                },
+                _cancellationTokenSource.Token
             );
+
+            Task.Run(
+                async () =>
+                {
+                    while (true)
+                    {
+                        byte[] dataToSend = await _sendBlock.ReceiveAsync();
+                        await SendAsync(dataToSend);
+                    }
+                },
+                _cancellationTokenSource.Token
+            );
+        }
+
+        public void Stop()
+        {
+            _cancellationTokenSource.Cancel();
         }
 
         public void Send(byte[] data)
         {
-            _sendQueue.Enqueue(data);
-
-            if (!_sendTaskWorking)
-            {
-                lock (_sendTaskSync)
-                {
-                    if (!_sendTaskWorking)
-                    {
-                        Task
-                            .Run(
-                                async () =>
-                                {
-                                    while (_sendQueue.TryDequeue(out byte[] dataToSend))
-                                    {
-                                        await SendAsync(data);
-                                    }
-                                })
-                            .ContinueWith(
-                                state =>
-                                {
-                                    _sendTaskWorking = false;
-                                });
-                    }
-                }
-            }
+            _sendBlock.Post(data);
         }
-
+        
         private async Task<byte[]> ReadData()
         {
             byte[] data = null;
@@ -176,19 +203,19 @@ namespace Server
             return result;
         }
 
-        private Task<int> SendAsync(byte[] data)
+        private Task SendAsync(byte[] data)
         {
-            var tcs = new TaskCompletionSource<int>();            
+            var tcs = new TaskCompletionSource<int>();
             _socket.BeginSend(data, 0, data.Length, SocketFlags.None, EndCallback, _socket);
 
             return tcs.Task;
 
             void EndCallback(IAsyncResult asyncResult)
             {
-                var socket = (Socket)asyncResult.AsyncState;
+                var socketLocal = (Socket)asyncResult.AsyncState;
                 try
                 {
-                    int bytesRead = socket.EndSend(asyncResult);
+                    int bytesRead = socketLocal.EndSend(asyncResult);
                     tcs.TrySetResult(bytesRead);
                 }
                 catch (Exception ex)
@@ -198,12 +225,31 @@ namespace Server
             }
         }
 
-        private async Task DisconnectAsync()
+        public Task DisconnectAsync()
         {
-            await Task.Factory.FromAsync(
-                _socket.BeginDisconnect(false, null, null),
-                _socket.EndDisconnect
-            );
+            var tcs = new TaskCompletionSource<int>();
+            _socket.BeginDisconnect(false, EndCallback, _socket);
+
+            return tcs.Task;
+
+            void EndCallback(IAsyncResult asyncResult)
+            {
+                var socket = (Socket)asyncResult.AsyncState;
+                try
+                {
+                    socket.EndDisconnect(asyncResult);
+                    tcs.TrySetResult(0);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }
+
+            //await Task.Factory.FromAsync(
+            //    _socket.BeginDisconnect(false, null, null),
+            //    _socket.EndDisconnect
+            //);
         }
     }
 }

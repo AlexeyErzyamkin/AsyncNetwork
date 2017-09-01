@@ -25,7 +25,7 @@ namespace Client
             Task[] clientTasks = new Task[ClientsCount];
             for (int clientIndex = 0; clientIndex < clientTasks.Length; ++clientIndex)
             {
-                var client = new Client(clientIndex, 200);
+                var client = new Client(clientIndex, 1000);
                 clientTasks[clientIndex] = Task.Run(client.Start);
 
                 await Task.Delay(_random.Next(100, 500));
@@ -98,7 +98,7 @@ namespace Client
                     sw.Stop();
                     Console.WriteLine($"Client {_clientId} in {attempt} attempt sent {length} bytes in {sw.Elapsed.TotalMilliseconds} ms");
 
-                    await Task.Delay(_random.Next(10, 500));
+                    //await Task.Delay(_random.Next(10, 500));
                 }
             }
 
