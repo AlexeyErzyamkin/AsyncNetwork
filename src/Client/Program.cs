@@ -10,7 +10,7 @@ namespace Client
 {
     class Program
     {
-        private const int ClientsCount = 1;
+        private const int ClientsCount = 1000;
 
         private static readonly Random _random = new Random();
 
@@ -19,26 +19,33 @@ namespace Client
         
         private static async Task MainAsync()
         {
-            var sw = new Stopwatch();
-            sw.Start();
+            //var sw = new Stopwatch();
+            //sw.Start();
 
             Task[] clientTasks = new Task[ClientsCount];
             for (int clientIndex = 0; clientIndex < clientTasks.Length; ++clientIndex)
             {
-                var client = new Client(clientIndex, 2000);
-                clientTasks[clientIndex] = Task.Run(client.Start);
+                var clientStopwatch = new Stopwatch();
+                clientStopwatch.Start();
 
-                //await Task.Delay(_random.Next(100, 500));
+                var client = new Client(clientIndex, 15000);
+                clientTasks[clientIndex] = Task.Run(client.Start)
+                    .ContinueWith(t => Console.WriteLine("ET: " + clientStopwatch.Elapsed));
+
+                //Console.WriteLine("Press ENTER to start another client...");
+                //Console.ReadLine();
+
+                await Task.Delay(_random.Next(100, 500));
             }
 
             await Task.WhenAll(clientTasks);
 
-            sw.Stop();
+            //sw.Stop();
 
-            Console.WriteLine("ET: " + sw.Elapsed);
+            //Console.WriteLine("ET: " + sw.Elapsed);
 
-            Console.WriteLine("Press ENTER to continue...");
-            Console.ReadLine();
+            //Console.WriteLine("Press ENTER to continue...");
+            //Console.ReadLine();
         }
     }
 
