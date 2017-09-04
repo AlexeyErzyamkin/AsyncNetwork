@@ -3,29 +3,42 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 
-using SyncServer;
+//using SyncServer;
 
 namespace Server
 {
     class Program
     {
         //private static readonly IClientConnectionFactory _connectionFactory = new GameClientConnectionFactory();
-        private static readonly ConcurrentQueue<ReadData> ReadChannel = new ConcurrentQueue<ReadData>();
-        private static readonly ConcurrentQueue<SendData> SendChannel = new ConcurrentQueue<SendData>();
+        private static readonly ConcurrentQueue<SyncServer.ReadData> ReadChannel = new ConcurrentQueue<SyncServer.ReadData>();
+        private static readonly ConcurrentQueue<SyncServer.SendData> SendChannel = new ConcurrentQueue<SyncServer.SendData>();
 
         private static volatile bool _needStop = false;
 
-        private static Thread _processThread;
+        private static Thread[] _processThread;
 
         static void Main(string[] args)
         {
             //MainAsync().GetAwaiter().GetResult();
 
-            var server = new SyncServer.Server(10891, 1000, null, ReadChannel, SendChannel);
+            var options = new SyncServer.ServerOptions
+            {
+                Port = 10891,
+                Backlog = 1000,
+                ReadThreadsCount = 4
+            };
+
+            var server = new SyncServer.Server(options, null, ReadChannel, SendChannel);
             server.Start();
 
-            _processThread = new Thread(ProcessData);
-            _processThread.Start();
+            _processThread = new Thread[4];
+            for (int threadIndex = 0; threadIndex < 4; ++threadIndex)
+            {
+                var processThread = new Thread(ProcessData);
+                processThread.Start();
+
+                _processThread[threadIndex] = processThread;
+            }
 
             Console.WriteLine("Press ENTER to stop...");
             Console.ReadLine();
@@ -44,9 +57,9 @@ namespace Server
         {
             while (!_needStop)
             {
-                if (ReadChannel.TryDequeue(out ReadData data))
+                if (ReadChannel.TryDequeue(out SyncServer.ReadData data))
                 {
-                    SendChannel.Enqueue(new SendData { ConnectionId = data.ConnectionId, Data = data.Data });
+                    SendChannel.Enqueue(new SyncServer.SendData { ConnectionId = data.ConnectionId, Data = data.Data });
                 }
 
                 Thread.Yield();

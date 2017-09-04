@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -18,12 +19,21 @@ namespace SyncServer
         public byte[] Data;
     }
 
+    public struct ServerOptions
+    {
+        public int Port;
+        public int Backlog;
+        public int ReadThreadsCount;
+    }
+
     public class Server
     {
-        public Server(int port, int backlog, IConnectionFactory connectionFactory, IProducerConsumerCollection<ReadData> readQueue, IProducerConsumerCollection<SendData> sendQueue)
+        public Server(ServerOptions options, IConnectionFactory connectionFactory, IProducerConsumerCollection<ReadData> readQueue, IProducerConsumerCollection<SendData> sendQueue)
         {
-            _port = port;
-            _backlog = backlog;
+            _port = options.Port;
+            _backlog = options.Backlog;
+            _readThreadsCount = options.ReadThreadsCount;
+
             _connectionFactory = connectionFactory;
             _readQueue = readQueue;
             _sendQueue = sendQueue;
@@ -39,8 +49,18 @@ namespace SyncServer
             _acceptConnectionsThread = new Thread(AcceptConnections);
             _acceptConnectionsThread.Start();
 
-            _processReadsThread = new Thread(ProcessReads);
-            _processReadsThread.Start();
+            _processReadsThreads = new Thread[_readThreadsCount];
+            for (int threadIndex = 0; threadIndex < _readThreadsCount; ++threadIndex)
+            {
+                var thread = new Thread(ProcessReads)
+                {
+                    Name = "Read thread #" + threadIndex
+                };
+                
+                thread.Start();
+
+                _processReadsThreads[threadIndex] = thread;
+            }
 
             _processSendsThread = new Thread(ProcessSends);
             _processSendsThread.Start();
@@ -54,7 +74,13 @@ namespace SyncServer
             _needStop = true;
 
             _acceptConnectionsThread.Join();
-            _processReadsThread.Join();
+            //_processReadsThread.Join();
+
+            foreach (Thread eachThread in _processReadsThreads)
+            {
+                eachThread.Join();
+            }
+
             _processSendsThread.Join();
 
             _acceptConnectionsSocket.Close();
@@ -85,15 +111,27 @@ namespace SyncServer
                     //
                 }
 
-                Thread.Yield();
+                _connectionsToAccept.Enqueue(clientConnection);
+
+                Thread.Sleep(10);
             }
         }
 
         private void ProcessReads()
         {
+            if (!_connectionsThreadLocal.IsValueCreated)
+            {
+                _connectionsThreadLocal.Value = new List<Connection>();
+            }
+
             while (!_needStop)
             {
-                foreach (Connection eachConnection in _connections.Values)
+                while (!_connectionsToAccept.IsEmpty && _connectionsToAccept.TryDequeue(out Connection connectionToAccept))
+                {
+                    _connectionsThreadLocal.Value.Add(connectionToAccept);
+                }
+
+                foreach (Connection eachConnection in _connectionsThreadLocal.Value)
                 {
                     if (eachConnection.TryRead(out byte[] data))
                     {
@@ -129,15 +167,20 @@ namespace SyncServer
 
         private readonly int _port;
         private readonly int _backlog;
+        private readonly int _readThreadsCount;
 
         private Socket _acceptConnectionsSocket;
         private Thread _acceptConnectionsThread;
 
-        private Thread _processReadsThread;
+        private Thread[] _processReadsThreads;
         private Thread _processSendsThread;
 
         private readonly IConnectionFactory _connectionFactory;
         private readonly ConcurrentDictionary<Guid, Connection> _connections = new ConcurrentDictionary<Guid, Connection>();
+
+        private readonly ConcurrentQueue<Connection> _connectionsToAccept = new ConcurrentQueue<Connection>();
+
+        private readonly ThreadLocal<List<Connection>> _connectionsThreadLocal = new ThreadLocal<List<Connection>>();
 
         private readonly IProducerConsumerCollection<ReadData> _readQueue;
         private readonly IProducerConsumerCollection<SendData> _sendQueue;
